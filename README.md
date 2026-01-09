@@ -48,6 +48,16 @@ python .\src\jpeg_compress.py --input input --output output --target-kb 5.0 --to
 python ./src/jpeg_compress.py --input input --output output --target-kb 5.0 --tolerance 0.5
 ```
 
+### Comparison (PowerShell)
+```
+python .\src\comparison.py --input input --output output
+```
+
+### Comparison (bash/zsh)
+```
+python ./src/comparison.py --input input --output output
+```
+
 Notes (PH):
 - `--size`: images are resized to `NxN` (default `128`).
 - `--epsilon`: PH threshold for accepting a single frequency.
@@ -60,10 +70,14 @@ Notes (JPEG):
 - `--target-kb`: desired output size in KB; `--tolerance` is +/- KB allowed.
 - Quality search runs from 100 down to 1 until within tolerance.
 
+Notes (Comparison):
+- Expects both `*_ph.png` and `*_jpeg.jpg` outputs for each input image.
+- Reports SSIM (higher=better), MSE (lower=better), Bottleneck Distance (lower=better), Betti Number Distance (lower=better).
+
 ## What It Does
 - PH: Converts to grayscale/resizes, ranks FFT freqs, PH-filters, reconstructs, and writes `*_ph.png`.
 - JPEG: Converts to grayscale/resizes, searches quality to hit `--target-kb` (within `--tolerance`), writes `*_jpeg.jpg`.
-- Comparison: placeholder for future PH vs JPEG metrics.
+- Comparison: runs SSIM, MSE, Bottleneck Distance, and Betti Number Distance to compare PH vs JPEG outputs against originals.
 
 ## Tips
 - PH evaluation is computationally heavy. Start with a small `--size` (e.g., `64`), lower `--max-freqs`, or reduce `--sample-ratio`.
