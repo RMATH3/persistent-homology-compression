@@ -1,7 +1,7 @@
 # Persistent Homology Compression
 
 NCSSM Morganton Research in Mathematics 2025  
-By: Anil Chintapalli, Arjun Rao, Henry Chen, Peter Tenholder
+By: Anil Chintapalli, Peter Tenholder, Henry Chen, Arjun Rao
 
 A tidy, single-script workflow for compressing images using persistent homology (PH) to select FFT frequencies.
 

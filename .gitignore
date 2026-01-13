@@ -58,6 +58,9 @@ dmypy.json
 # VS Code
 .vscode/
 
+# Idea
+.idea/
+
 # Environments
 .env
 .venv

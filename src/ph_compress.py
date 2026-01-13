@@ -10,6 +10,7 @@ from skimage.color import rgb2gray
 from skimage.io import imread, imsave
 from skimage.transform import resize
 from skimage import img_as_ubyte
+from scipy.ndimage import gaussian_filter
 
 
 def compute_ph_diagram(img: np.ndarray) -> np.ndarray:
@@ -44,99 +45,95 @@ def _unique_freqs(shape: tuple[int, int]) -> list[tuple[int, int]]:
     return freqs
 
 
-def keep_freqs(
-    original_image: np.ndarray,
-    initial_epsilon: float = 11.040,
-    max_freqs: int | None = None,
-    decay_rate: float = 1.0,
-    sample_ratio: float = 1.0,
+def rank_and_mask_freqs(
+        original_image: np.ndarray,
+        alpha: float = 0.3,
 ):
-    """Select FFT frequencies whose single-frequency reconstruction preserves PH diagram within epsilon.
+    """
+    Ranks frequencies by Importance Score (W1 * 1/f) and retains top alpha%.
 
     Returns the masked FFT image and count of kept frequencies.
     """
     original_ph = compute_ph_diagram(original_image)
     fft_image = np.fft.fft2(original_image)
-    kept_mask = np.zeros_like(fft_image, dtype=bool)
-
     height, width = fft_image.shape
     freqs = _unique_freqs((height, width))
 
-    # sort by magnitude (descending) and optionally subsample
-    freqs.sort(key=lambda pos: np.abs(fft_image[pos]), reverse=True)
-    if 0 < sample_ratio < 1.0:
-        freqs = freqs[: max(1, int(len(freqs) * sample_ratio))]
+    scores = {}
+    print(f"Ranking {len(freqs)} unique frequencies...")
 
-    kept_count = 0
-    evaluated = 0
-    epsilon = initial_epsilon
-    max_freqs = max_freqs or len(freqs)
-
-    for u, v in freqs:
-        if evaluated >= max_freqs:
-            break
-
-        single_freq = np.zeros_like(fft_image, dtype=complex)
+    for idx, (u, v) in enumerate(freqs):
+        # Reconstruct using only this frequency pair [cite: 276]
+        single_freq_mask = np.zeros_like(fft_image, dtype=complex)
         ci, cj = _conj_index((height, width), (u, v))
-        single_freq[u, v] = fft_image[u, v]
-        single_freq[ci, cj] = fft_image[ci, cj]
+        single_freq_mask[u, v] = fft_image[u, v]
+        single_freq_mask[ci, cj] = fft_image[ci, cj]
 
-        inv = np.fft.ifft2(single_freq).real
+        inv = np.fft.ifft2(single_freq_mask).real
         freq_ph = compute_ph_diagram(inv)
 
+        # Importance Score formula[cite: 281]:
+        # score = W1(D_full, D_single) * (1 / sqrt(fx^2 + fy^2))
         try:
             dist = wasserstein_distance(original_ph, freq_ph, order=1.0)
         except Exception:
-            dist = float("inf")
+            dist = 0.0
 
-        if dist < epsilon:
-            kept_mask[u, v] = True
-            kept_mask[ci, cj] = True
-            kept_count += 1
+        freq_norm = np.sqrt(u ** 2 + v ** 2) + 1e-8
+        # Higher score = more important [cite: 286]
+        scores[(u, v)] = dist * (1.0 / freq_norm)
 
-        evaluated += 1
-        if evaluated % 100 == 0:
-            print(f"Evaluated {evaluated}, kept {kept_count}, epsilon = {epsilon:.3f}")
-            epsilon *= decay_rate  # gradually loosen
+        if idx % 500 == 0:
+            print(f"  Ranked {idx}/{len(freqs)} frequencies...")
 
-    return fft_image * kept_mask, kept_count
+    # Sort frequencies by score in descending order [cite: 287]
+    ranked_freqs = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+    # Retain the top alpha percentage
+    keep_count_limit = max(1, int(len(ranked_freqs) * alpha))
+    kept_mask = np.zeros_like(fft_image, dtype=complex)
+
+    actual_kept_count = 0
+    for i in range(keep_count_limit):
+        (u, v), _ = ranked_freqs[i]
+        ci, cj = _conj_index((height, width), (u, v))
+        kept_mask[u, v] = fft_image[u, v]
+        kept_mask[ci, cj] = fft_image[ci, cj]
+        actual_kept_count += 1
+
+    return fft_image * (kept_mask != 0), actual_kept_count
 
 
 def process_image(
-    input_path: Path,
-    output_dir: Path,
-    size: int = 128,
-    epsilon: float = 11.040,
-    max_freqs: int | None = None,
-    decay_rate: float = 1.0,
-    sample_ratio: float = 1.0,
-    save_plot: bool = False,
+        input_path: Path,
+        output_dir: Path,
+        size: int = 128,
+        alpha: float = 0.3,
 ) -> dict:
-    """Process a single image and write PH-compressed output PNG.
-
-    Returns a dict with summary stats.
-    """
-    print(f"\nProcessing {input_path.name} ...")
+    """Process a single image using the Importance Score ranking[cite: 311]."""
+    print(f"\nProcessing {input_path.name} with alpha={alpha:.2f} ...")
     image = imread(str(input_path))
-    if image.ndim == 3 and image.shape[-1] == 4:
-        image = image[..., :3]
+    if image.ndim == 3:
+        if image.shape[-1] == 4:
+            image = image[..., :3]
+        image = rgb2gray(image)  # [cite: 261]
 
-    gray = rgb2gray(image)
-    gray_resized = resize(gray, (size, size), anti_aliasing=True)
+    gray_resized = resize(image, (size, size), anti_aliasing=True)  # [cite: 267]
 
     start = time.time()
-    kept_fft, kept_count = keep_freqs(
+    kept_fft, kept_count = rank_and_mask_freqs(
         gray_resized,
-        initial_epsilon=epsilon,
-        max_freqs=max_freqs,
-        decay_rate=decay_rate,
-        sample_ratio=sample_ratio,
+        alpha=alpha
     )
     compression_time = time.time() - start
-    print(f"Compression time: {compression_time:.2f} seconds")
 
+    # Inverse FFT to reconstruct [cite: 191]
     reconstructed = np.fft.ifft2(kept_fft).real
-    clipped = np.clip(reconstructed, 0, 1)
+
+    # Apply Gaussian smoothing (sigma=1) to stabilize topological features
+    smoothed = gaussian_filter(reconstructed, sigma=1.0)
+
+    clipped = np.clip(smoothed, 0, 1)
     uint8_img = img_as_ubyte(clipped)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -153,13 +150,13 @@ def process_image(
         "output_path": str(out_path),
     }
 
-    print(f"Saved {out_name} | size: {stats['ph_size_kb']:.2f} KB")
+    print(f"Saved {out_name} | size: {stats['ph_size_kb']:.2f} KB | Kept: {kept_count}")
     return stats
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Persistent Homology-based image compression (batch over a folder)"
+        description="PH-based image compression using Equation 3 Importance Ranking [cite: 1]"
     )
     parser.add_argument(
         "--input", type=str, default="input", help="Input folder containing images"
@@ -172,28 +169,10 @@ def main():
     )
     parser.add_argument("--size", type=int, default=128, help="Resize dimension (NxN)")
     parser.add_argument(
-        "--epsilon",
+        "--alpha",
         type=float,
-        default=11.040,
-        help="Initial epsilon for PH distance threshold",
-    )
-    parser.add_argument(
-        "--decay-rate",
-        type=float,
-        default=1.0,
-        help="Decay rate applied to epsilon every 100 evals",
-    )
-    parser.add_argument(
-        "--max-freqs",
-        type=int,
-        default=None,
-        help="Limit number of frequencies evaluated (performance control)",
-    )
-    parser.add_argument(
-        "--sample-ratio",
-        type=float,
-        default=1.0,
-        help="Fraction of top-magnitude freqs to evaluate (0<r<=1)",
+        default=0.3,
+        help="Percentage of top frequencies to retain (0.0 to 1.0) [cite: 319]",
     )
     parser.add_argument(
         "--extensions",
@@ -209,15 +188,12 @@ def main():
     exts = {e.strip().lower() for e in args.extensions.split(",")}
 
     if not input_dir.exists():
-        print(f"Input folder '{input_dir}' does not exist. Create it and add images.")
+        print(f"Input folder '{input_dir}' does not exist.")
         return
 
     images = [
         p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() in exts
     ]
-    if not images:
-        print(f"No images in '{input_dir}'. Supported: {', '.join(sorted(exts))}")
-        return
 
     summary = []
     for img_path in images:
@@ -225,17 +201,14 @@ def main():
             img_path,
             output_dir,
             size=args.size,
-            epsilon=args.epsilon,
-            max_freqs=args.max_freqs,
-            decay_rate=args.decay_rate,
-            sample_ratio=args.sample_ratio,
+            alpha=args.alpha,
         )
         summary.append(stats)
 
     print("\nSummary:")
     for s in summary:
         print(
-            f"- {s['file']}: kept={s['kept_count']} | time={s['compression_time_sec']}s | size={s['ph_size_kb']:.2f}KB -> {s['output_path']}"
+            f"- {s['file']}: kept={s['kept_count']} | time={s['compression_time_sec']}s | size={s['ph_size_kb']:.2f}KB"
         )
 
 
