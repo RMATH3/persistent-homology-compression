@@ -6,12 +6,16 @@ By: Anil Chintapalli, Peter Tenholder, Henry Chen, Arjun Rao
 A tidy, single-script workflow for compressing images using persistent homology (PH) to select FFT frequencies.
 
 ## Project Layout
-- `environment.yml`: Conda environment spec (Python, NumPy, SciPy, scikit-image, Matplotlib, Gudhi, Pillow)
-- `src/ph_compress.py`: Single CLI for batch PH compression
-- `src/jpeg_compress.py`: JPEG compressor targeting a file size
-- `src/comparison.py`: Placeholder for PH vs JPEG metrics (to be filled in later)
-- `input/`: Put source images here (`.png`, `.jpg`, `.jpeg`)
-- `output/`: Compressed images are written here (`*_ph.png`, `*_jpeg.jpg`)
+- `requirements.txt`: pip dependencies for the project
+- `src/compressors/ph_compressor.py`: Persistent homology–based image compressor CLI
+- `src/compressors/jpeg_compressor.py`: JPEG compressor CLI targeting a file size
+- `src/metrics/metrics.py`: Standard evaluation metrics (SSIM, MSE, Wasserstein distance, Bottleneck distance, file size, compression ratio)
+- `src/metrics/topology_metrics.py`: Topological metrics (persistence diagrams, Betti number distance)
+- `src/utils/image_utils.py`: Image loading and preprocessing functions
+- `src/comparison/compare.py`: Experiment runner that loads images, applies metrics, compares PH vs JPEG outputs, and prints results
+- `inputs/images/`: Original source images 
+- `outputs/compressed/`: Compressed PH and JPEG images
+- `outputs/figures/`: Optional plots or visualizations from experiments
 
 ## Setup (Conda)
 ```
