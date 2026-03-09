@@ -3,15 +3,19 @@ import os
 from pathlib import Path
 
 import numpy as np
-from gudhi import CubicalComplex, bottleneck_distance, wasserstein_distance
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import mean_squared_error as mse
-
 
 from src.metrics.topology_metrics import compute_ph_diagram, betti_distance
 
 from src.utils.image_utils import load_and_prep
-from src.metrics.metrics import (ssim_metric, mse_metric, wasserstein_metric, bottleneck_metric, file_size_kb, compression_ratio)
+from src.metrics.metrics import ssim_metric, mse_metric, wasserstein_metric, bottleneck_metric, file_size_kb, compression_ratio
+
+from src.compressors.ph_compressor import process_image
+from src.compressors.jpeg_compressor import compress_image_jpeg
+from pathlib import Path
+import ot
+
 
 
 SIZE = 128
@@ -53,6 +57,9 @@ def compare_images(original_path: Path, ph_path: Path, jpeg_path: Path) -> dict:
     results["size_ph"] = file_size_kb(ph_path)
     results["size_jpeg"] = file_size_kb(jpeg_path)
 
+    results["betti_ph"] = betti_distance(pd_orig, pd_ph)
+    results["betti_jpeg"] = betti_distance(pd_orig, pd_jpeg)
+
     results["compression_ratio_ph"] = compression_ratio(original_path, ph_path)
     results["compression_ratio_jpeg"] = compression_ratio(original_path, jpeg_path)
 
@@ -65,16 +72,23 @@ def main():
     parser.add_argument("--output", type=str, default="outputs/compressed", help="Compressed images folder")
     args = parser.parse_args()
 
-    input_dir, output_dir = Path(args.input), Path(args.output)
+    input_dir = Path(args.input)
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
     originals = [p for p in input_dir.iterdir() if p.suffix.lower() in EXTENSIONS]
 
     print(f"{'Image':<20} | {'Metric':<12} | {'PH':<10} | {'JPEG':<10}")
     print("-" * 60)
 
     for orig_p in originals:
-        ph_p, jpeg_p = output_dir / f"{orig_p.stem}_ph.png", output_dir / f"{orig_p.stem}_jpeg.jpg"
-        if not ph_p.exists() or not jpeg_p.exists():
-            continue
+        ph_stats = process_image(orig_p, output_dir)
+        ph_p = Path(ph_stats["output_path"])
+
+
+
+        jpeg_stats = compress_image_jpeg(
+            input_path=orig_p, output_dir=output_dir, target_kb=ph_stats["ph_size_kb"], tolerance=0.5)
+        jpeg_p = Path(jpeg_stats["output_path"])
 
         res = compare_images(orig_p, ph_p, jpeg_p)
         print(f"{orig_p.name:<20}")

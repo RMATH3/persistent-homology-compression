@@ -1,7 +1,8 @@
 import os
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import mean_squared_error as mse
-from gudhi import wasserstein_distance, bottleneck_distance
+from gudhi.wasserstein import wasserstein_distance
+from gudhi.bottleneck import bottleneck_distance
 
 
 # 1. Structural Similarity (SSIM)
